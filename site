@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Trust me — demo</title>
+<style>
+  :root{
+    --bg:#0b0b0f;
+    --accent1:#ff6b6b;
+    --accent2:#7bffb2;
+    --accent3:#8ab6ff;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+  .center {
+    position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;flex-direction:column;gap:16px;
+    text-align:center;padding:24px;
+  }
+  .btn {
+    appearance:none;border:0;padding:18px 34px;border-radius:999px;font-size:18px;cursor:pointer;
+    background:linear-gradient(90deg,var(--accent1),var(--accent2));
+    box-shadow:0 6px 28px rgba(0,0,0,0.6), inset 0 -6px 20px rgba(255,255,255,0.04);
+    color:#0b0b0f;font-weight:700;
+  }
+  .subtitle{font-size:14px;opacity:.85}
+  .controls{display:flex;gap:12px;margin-top:8px}
+  .small {
+    background: rgba(255,255,255,0.06);
+    border-radius:10px;padding:8px 12px;font-size:13px;color:#fff;cursor:pointer;border:0;
+  }
+
+  /* canvas fullscreen */
+  canvas#bgCanvas{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:1}
+
+  /* warning box */
+  .warning{
+    position:fixed;left:12px;top:12px;background:rgba(0,0,0,0.5);padding:10px 12px;border-radius:8px;font-size:13px;z-index:11;
+  }
+
+  /* respect reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    .btn{transform:none}
+  }
+
+  /* simple fade-out when started */
+  .hide-center { animation: fadeOut 500ms forwards; }
+  @keyframes fadeOut { to { opacity:0; transform: translateY(-8px); pointer-events:none } }
+</style>
+</head>
+<body>
+<div class="warning" role="status" aria-live="polite">
+  <strong>Atenção:</strong> efeitos rápidos e luzes piscantes. Se tiver sensibilidade, não clique.
+</div>
+
+<canvas id="bgCanvas" aria-hidden="true"></canvas>
+
+<div class="center" id="ui">
+  <h1 style="margin:0;font-size:24px">Trust me?</h1>
+  <div class="subtitle">Clique para iniciar — o som e a animação começam após o clique.</div>
+  <div style="height:8px"></div>
+  <button id="trustBtn" class="btn">Trust me</button>
+
+  <div class="controls" style="display:none" id="runControls">
+    <button id="stopBtn" class="small">Parar</button>
+    <button id="muteBtn" class="small">Mudo</button>
+    <button id="restartBtn" class="small">Reiniciar</button>
+  </div>
+</div>
+
+<audio id="bgAudio" preload="auto">
+  <!-- Substitua pelo seu arquivo. requer ação do usuário antes de tocar. -->
+  <source src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_7a4b1b8b16.mp3?filename=retro-synth-loop-11065.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+/*
+  Demo: canvas background with moving blobs + global flash.
+  - Respeita prefers-reduced-motion
+  - Requer clique para iniciar (autoplay policies)
+*/
+
+const canvas = document.getElementById('bgCanvas');
+const ctx = canvas.getContext('2d', { alpha: true });
+let w = canvas.width = innerWidth;
+let h = canvas.height = innerHeight;
+const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+window.addEventListener('resize', ()=>{ w=canvas.width=innerWidth; h=canvas.height=innerHeight; });
+
+const blobs = [];
+function rand(min,max){ return Math.random()*(max-min)+min; }
+
+class Blob {
+  constructor(){
+    this.x = rand(0,w);
+    this.y = rand(0,h);
+    this.r = rand(80,260);
+    this.vx = rand(-0.3,0.3);
+    this.vy = rand(-0.2,0.2);
+    this.h = rand(0,360);
+    this.s = rand(60,90);
+    this.l = rand(40,60);
+  }
+  step(){
+    this.x += this.vx;
+    this.y += this.vy;
+    if(this.x<-300) this.x = w+300;
+    if(this.x> w+300) this.x = -300;
+    if(this.y<-300) this.y = h+300;
+    if(this.y> h+300) this.y = -300;
+  }
+  draw(ctx, i){
+    const g = ctx.createRadialGradient(this.x,this.y,this.r*0.05,this.x,this.y,this.r);
+    const color = `hsl(${this.h}deg ${this.s}% ${this.l}%)`;
+    g.addColorStop(0, color);
+    g.addColorStop(1, `hsla(${this.h}, ${this.s}%, ${this.l}%, 0)`);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(this.x,this.y,this.r,this.r*0.7,0,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function initBlobs(num=6){
+  blobs.length=0;
+  for(let i=0;i<num;i++){
+    blobs.push(new Blob());
+  }
+}
+initBlobs();
+
+let t = 0;
+let flash = 0;
+function render(){
+  t += 0.016;
+  ctx.clearRect(0,0,w,h);
+  // subtle background noise
+  ctx.fillStyle = 'rgba(8,8,12,0.9)';
+  ctx.fillRect(0,0,w,h);
+
+  // draw blobs
+  for(let i=0;i<blobs.length;i++){
+    blobs[i].step();
+    blobs[i].draw(ctx,i);
+  }
+
+  // occasional flash effect
+  if(!prefersReduced) {
+    if(Math.random() < 0.008) {
+      flash = rand(0.4,0.85);
+    }
+    if(flash > 0){
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,255,255,${flash*0.25})`;
+      ctx.fillRect(0,0,w,h);
+      flash *= 0.92;
+    }
+  }
+
+  // vignette
+  const grad = ctx.createRadialGradient(w/2,h/2,Math.min(w,h)/6,w/2,h/2,Math.max(w,h));
+  grad.addColorStop(0,'rgba(0,0,0,0)');
+  grad.addColorStop(1,'rgba(0,0,0,0.45)');
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,w,h);
+
+  requestAnimationFrame(render);
+}
+
+// Controls
+const ui = document.getElementById('ui');
+const trustBtn = document.getElementById('trustBtn');
+const runControls = document.getElementById('runControls');
+const stopBtn = document.getElementById('stopBtn');
+const muteBtn = document.getElementById('muteBtn');
+const restartBtn = document.getElementById('restartBtn');
+const audio = document.getElementById('bgAudio');
+
+let running = false;
+
+function start() {
+  if(prefersReduced){
+    // if reduced motion, do a gentle effect
+    initBlobs(3);
+  } else {
+    initBlobs(6);
+  }
+  if(!running){
+    requestAnimationFrame(render);
+    running = true;
+  }
+  // try to play audio (must be user gesture)
+  audio.currentTime = 0;
+  audio.play().catch(()=>{ /* ignored */ });
+  ui.classList.add('hide-center');
+  setTimeout(()=>{ ui.style.pointerEvents='none'; ui.style.visibility='hidden'; }, 600);
+  runControls.style.display='flex';
+}
+
+trustBtn.addEventListener('click', ()=>{
+  start();
+});
+
+stopBtn.addEventListener('click', ()=>{
+  // stop audio and animation (simple: reload page or stop drawing)
+  audio.pause();
+  running = false;
+  // clear canvas
+  ctx.clearRect(0,0,w,h);
+  // show UI again
+  ui.style.visibility='visible'; ui.style.pointerEvents='auto'; ui.classList.remove('hide-center');
+  runControls.style.display='none';
+});
+
+muteBtn.addEventListener('click', ()=>{
+  audio.muted = !audio.muted;
+  muteBtn.textContent = audio.muted ? 'Sem som' : 'Mudo';
+});
+
+restartBtn.addEventListener('click', ()=>{
+  audio.currentTime = 0;
+  audio.play().catch(()=>{});
+  if(!running){ running = true; requestAnimationFrame(render); }
+});
+
+// Accessibility: if user wants reduced motion, don't do flashing
+if(prefersReduced){
+  console.log('prefers-reduced-motion detected — reducing animations');
+}
+
+</script>
+</body>
+</html>
